@@ -23,6 +23,9 @@
       <nav class="hidden sm:flex items-center gap-5 text-sm font-medium text-slate-600">
         <a href="{{ prefix }}/" class="hover:text-indigo-600 transition">New</a>
         <a href="{{ prefix }}/history" class="hover:text-indigo-600 transition">History</a>
+        {% if is_admin %}
+        <a href="{{ prefix }}/admin" class="hover:text-indigo-600 transition">Admin</a>
+        {% endif %}
       </nav>
       <a href="https://lab.kudithipudi.org/" class="hidden lg:inline-flex items-center text-sm text-slate-500 hover:text-slate-900 transition">
         <span aria-hidden="true" class="mr-1">&larr;</span> lab.kudithipudi.org

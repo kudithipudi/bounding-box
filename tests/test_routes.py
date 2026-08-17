@@ -140,3 +140,116 @@ def test_pdf_render_and_detect(client, fake_llm, tmp_path):
     assert resp.status_code == 200
     assert "pdf" in resp.text
     assert "p1" in resp.text
+
+
+# --- thumbnails ----------------------------------------------------------
+
+
+def test_thumbnail_generated_and_served(client, fake_llm, png_bytes):
+    fake_llm()
+    _post_detect(client, content=png_bytes)
+    resp = client.get("/media/1?thumb=1")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/jpeg"
+    assert len(resp.content) > 0
+
+
+def test_history_shows_thumbnail(client, fake_llm, png_bytes):
+    fake_llm()
+    _post_detect(client, content=png_bytes)
+    resp = client.get("/history")
+    assert resp.status_code == 200
+    assert "media/1?thumb=1" in resp.text
+
+
+# --- rate limiting -------------------------------------------------------
+
+
+def test_detect_rate_limited_per_ip(client, fake_llm, png_bytes, monkeypatch):
+    monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "2")
+    fake_llm()
+
+    assert _post_detect(client, content=png_bytes).status_code == 303
+    assert _post_detect(client, content=png_bytes).status_code == 303
+    resp = _post_detect(client, content=png_bytes)
+    assert resp.status_code == 429
+    assert "Too many requests" in resp.text
+
+
+# --- admin ---------------------------------------------------------------
+
+
+def test_admin_login_page(client):
+    resp = client.get("/admin/login")
+    assert resp.status_code == 200
+    assert "Admin login" in resp.text
+
+
+def test_admin_redirects_when_logged_out(client):
+    resp = client.get("/admin", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/bounding-box/admin/login"
+
+
+def test_admin_wrong_password(client):
+    resp = client.post("/admin/login", data={"password": "nope"}, follow_redirects=False)
+    assert resp.status_code == 401
+    assert "Wrong password" in resp.text
+
+
+def test_admin_login_and_logout(client):
+    resp = client.post(
+        "/admin/login", data={"password": "test-admin-password"}, follow_redirects=False
+    )
+    assert resp.status_code == 303
+    assert client.get("/admin", follow_redirects=False).status_code == 200
+    resp = client.post("/admin/logout", follow_redirects=False)
+    assert resp.status_code == 303
+    assert client.get("/admin", follow_redirects=False).status_code == 303
+
+
+def test_admin_delete_requires_login(client, fake_llm, png_bytes):
+    fake_llm()
+    _post_detect(client, content=png_bytes)
+    resp = client.post("/admin/delete/1", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/bounding-box/admin/login"
+
+
+def test_admin_delete_removes_detection(client, fake_llm, png_bytes):
+    fake_llm()
+    _post_detect(client, content=png_bytes)
+    client.post("/admin/login", data={"password": "test-admin-password"})
+    resp = client.post("/admin/delete/1", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/bounding-box/admin"
+    # Detection no longer viewable.
+    assert client.get("/r/1").status_code == 404
+    assert client.get("/media/1").status_code == 404
+
+
+def test_admin_delete_removes_media_files(client, fake_llm, png_bytes, tmp_path, monkeypatch):
+    """Deleting a detection also unlinks its stored image and thumbnail."""
+    import glob
+    import os
+
+    uploads = str(tmp_path / "uploads")
+    monkeypatch.setenv("UPLOADS_DIR", uploads)
+    fake_llm()
+    _post_detect(client, content=png_bytes)
+    files = glob.glob(os.path.join(uploads, "*"))
+    assert len(files) == 2  # full image + thumbnail
+
+    client.post("/admin/login", data={"password": "test-admin-password"})
+    client.post("/admin/delete/1", follow_redirects=False)
+    assert glob.glob(os.path.join(uploads, "*")) == []
+
+
+def test_admin_page_lists_detections_with_thumbnail(client, fake_llm, png_bytes):
+    fake_llm()
+    _post_detect(client, content=png_bytes)
+    client.post("/admin/login", data={"password": "test-admin-password"})
+    resp = client.get("/admin")
+    assert resp.status_code == 200
+    assert "the red circle" in resp.text
+    assert "media/1?thumb=1" in resp.text

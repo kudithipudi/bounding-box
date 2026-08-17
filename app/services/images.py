@@ -123,3 +123,43 @@ def to_base64(image: Image.Image, mime: str = "image/jpeg") -> str:
     else:
         image.save(buf, format="JPEG", quality=get_settings().jpeg_quality, optimize=True)
     return "data:" + mime + ";base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def for_llm(image: Image.Image) -> Image.Image:
+    """Downscale a display image to the model-resolution cap.
+
+    Vision-LLM tokens scale with image resolution; normalized bounding boxes
+    are resolution-independent, so we send a smaller copy to the model while
+    keeping the higher-res original for display. Returns the same image if it
+    is already within the cap.
+    """
+    cap = get_settings().llm_max_image_dimension
+    if max(image.size) <= cap:
+        return image
+    scale = cap / max(image.size)
+    return image.resize((round(image.width * scale), round(image.height * scale)), Image.LANCZOS)
+
+
+def to_llm_base64(image: Image.Image) -> str:
+    """Encode the model-bound copy at the model JPEG quality."""
+    import base64
+
+    buf = io.BytesIO()
+    img = for_llm(image)
+    img.save(buf, format="JPEG", quality=get_settings().llm_jpeg_quality, optimize=True)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def make_thumbnail(image: Image.Image, max_dim: int = 320) -> Image.Image:
+    """Small JPEG preview for history listings."""
+    scale = min(1.0, max_dim / max(image.size))
+    if scale < 1.0:
+        image = image.resize((round(image.width * scale), round(image.height * scale)), Image.LANCZOS)
+    return image
+
+
+def to_jpeg_bytes_thumb(image: Image.Image, max_dim: int = 320) -> bytes:
+    """JPEG bytes of a downscaled thumbnail (used for history previews)."""
+    buf = io.BytesIO()
+    make_thumbnail(image, max_dim).save(buf, format="JPEG", quality=70, optimize=True)
+    return buf.getvalue()

@@ -20,11 +20,32 @@ async def connect(db_path: str | None = None) -> aiosqlite.Connection:
     return conn
 
 
+# Idempotent migrations for DBs created before a column was added. The base
+# schema.sql only creates tables; ALTERs are listed here so a running deploy
+# upgrades in place on the next restart.
+_MIGRATIONS = [
+    # bounding-box v2: thumbnails + rate limiting
+    "ALTER TABLE detections ADD COLUMN thumb_file TEXT NOT NULL DEFAULT ''",
+]
+
+
+async def _migrate(conn: aiosqlite.Connection) -> None:
+    for statement in _MIGRATIONS:
+        try:
+            await conn.execute(statement)
+        except aiosqlite.OperationalError as exc:
+            if "duplicate column name" in str(exc):
+                continue  # already applied
+            raise
+    await conn.commit()
+
+
 async def init_db(db_path: str | None = None) -> None:
     conn = await connect(db_path)
     try:
         schema = _SCHEMA_PATH.read_text()
         await conn.executescript(schema)
+        await _migrate(conn)
         await conn.commit()
         logger.info("Database schema applied")
     finally:
@@ -46,6 +67,7 @@ async def save_detection(
     kind: str,
     page: int,
     media_file: str,
+    thumb_file: str,
     content_type: str,
     width: int,
     height: int,
@@ -61,12 +83,13 @@ async def save_detection(
     error: str = "",
 ) -> int:
     cur = await conn.execute(
-        "INSERT INTO detections (original_name, kind, page, media_file, content_type,"
-        " width, height, description, x1, y1, x2, y2, label, confidence, model,"
-        " status, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO detections (original_name, kind, page, media_file, thumb_file,"
+        " content_type, width, height, description, x1, y1, x2, y2, label, confidence,"
+        " model, status, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            original_name, kind, page, media_file, content_type, width, height,
-            description, x1, y1, x2, y2, label, confidence, model, status, error,
+            original_name, kind, page, media_file, thumb_file, content_type,
+            width, height, description, x1, y1, x2, y2, label, confidence, model,
+            status, error,
         ),
     )
     await conn.commit()
@@ -80,10 +103,50 @@ async def get_detection(conn: aiosqlite.Connection, detection_id: int) -> dict |
     return dict(rows[0]) if rows else None
 
 
+async def delete_detection(conn: aiosqlite.Connection, detection_id: int) -> bool:
+    """Delete a detection row. Returns True if a row was removed."""
+    cur = await conn.execute("DELETE FROM detections WHERE id = ?", (detection_id,))
+    await conn.commit()
+    return cur.rowcount > 0
+
+
 async def list_detections(conn: aiosqlite.Connection, limit: int = 50) -> list[dict]:
     rows = await conn.execute_fetchall(
         "SELECT id, original_name, kind, description, label, confidence, status,"
-        " created_at FROM detections ORDER BY id DESC LIMIT ?",
+        " thumb_file, created_at FROM detections ORDER BY id DESC LIMIT ?",
         (limit,),
     )
     return [dict(r) for r in rows]
+
+
+async def check_and_record_rate_limit(
+    conn: aiosqlite.Connection,
+    *,
+    ip: str,
+    route: str,
+    limit: int,
+    window_seconds: int,
+) -> bool:
+    """Record a hit for (ip, route) and return whether it's within `limit`
+    hits in the trailing `window_seconds`. Also prunes hits for this route
+    older than the window, so the table doesn't grow unbounded."""
+    offset = f"-{window_seconds} seconds"
+    await conn.execute(
+        "DELETE FROM rate_limit_hits WHERE route = ?"
+        " AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
+        (route, offset),
+    )
+    cur = await conn.execute(
+        "SELECT COUNT(*) FROM rate_limit_hits WHERE route = ? AND ip = ?"
+        " AND created_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
+        (route, ip, offset),
+    )
+    row = await cur.fetchone()
+    if row[0] >= limit:
+        await conn.commit()
+        return False
+    await conn.execute(
+        "INSERT INTO rate_limit_hits (ip, route) VALUES (?, ?)", (ip, route)
+    )
+    await conn.commit()
+    return True

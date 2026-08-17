@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS detections (
     kind           TEXT NOT NULL,               -- 'image' | 'pdf'
     page           INTEGER NOT NULL DEFAULT 1,  -- rendered page for PDFs
     media_file     TEXT NOT NULL,               -- filename under data/uploads
+    thumb_file     TEXT NOT NULL DEFAULT '',    -- small JPEG preview for history
     content_type   TEXT NOT NULL,               -- served media content type
     width          INTEGER NOT NULL,
     height         INTEGER NOT NULL,
@@ -24,3 +25,14 @@ CREATE TABLE IF NOT EXISTS detections (
 );
 
 CREATE INDEX IF NOT EXISTS idx_detections_created_at ON detections (created_at DESC);
+
+-- Per-IP rate limiting for POST /detect (trailing window).
+CREATE TABLE IF NOT EXISTS rate_limit_hits (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip         TEXT NOT NULL,
+    route      TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limit_hits_route_time
+    ON rate_limit_hits (route, created_at);

@@ -5,6 +5,9 @@ from app.main import app
 from app.services.llm import Detection
 
 
+TEST_ADMIN_PASSWORD = "test-admin-password"
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     """A TestClient wired to a throwaway SQLite db, temp uploads dir, and no
@@ -13,8 +16,29 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
     monkeypatch.setenv("ROOT_PATH", "/bounding-box")
     monkeypatch.setenv("LLM_API_KEY", "")
+    monkeypatch.setenv("ADMIN_PASSWORD", TEST_ADMIN_PASSWORD)
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
+    monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "1000")
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture
+def anon_client(client):
+    """A client with no admin session — for exercising what a visitor who
+    hasn't logged in can and can't reach."""
+    return client
+
+
+@pytest.fixture
+def admin_client(client):
+    """A client already logged in to /admin (session cookie carries over to
+    every subsequent request, same as a real browser)."""
+    resp = client.post(
+        "/admin/login", data={"password": TEST_ADMIN_PASSWORD}, follow_redirects=False
+    )
+    assert resp.status_code == 303
+    return client
 
 
 @pytest.fixture

@@ -7,10 +7,12 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import get_settings
-from app.db import (get_db, get_detection, list_detections, save_detection)
+from app.db import (check_and_record_rate_limit, get_db, get_detection,
+                    list_detections, save_detection)
 from app.services import llm
 from app.services.images import (classify_upload, normalize_image,
-                                 to_base64, to_jpeg_bytes,
+                                 to_jpeg_bytes, to_llm_base64,
+                                 to_jpeg_bytes_thumb,
                                  UnsupportedFileError, PdfRenderError)
 
 router = APIRouter()
@@ -22,14 +24,20 @@ def _uploads_dir() -> Path:
     return Path(get_settings().uploads_dir)
 
 
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _render(request: Request, name: str, context: dict, **kwargs):
+    """Render a template with the admin flag available to the chrome."""
+    context.setdefault("is_admin", bool(request.session.get("is_admin")))
+    return templates.TemplateResponse(request, name, context, **kwargs)
+
+
 @router.get("/")
 async def index(request: Request, db=Depends(get_db)):
     recent = await list_detections(db, limit=8)
-    return templates.TemplateResponse(
-        request,
-        "index.html",
-        {"recent": recent, "error": None, "description": ""},
-    )
+    return _render(request, "index.html", {"recent": recent, "error": None, "description": ""})
 
 
 @router.post("/detect")
@@ -44,8 +52,24 @@ async def create_detection(
     settings = get_settings()
     recent = await list_detections(db, limit=8)
     description = description.strip()
+
+    allowed = await check_and_record_rate_limit(
+        db,
+        ip=_client_ip(request),
+        route="detect",
+        limit=settings.rate_limit_per_minute,
+        window_seconds=settings.rate_limit_window_seconds,
+    )
+    if not allowed:
+        return _render(
+            request,
+            "index.html",
+            {"recent": recent, "error": "Too many requests — please wait a minute and try again.", "description": description},
+            status_code=429,
+        )
+
     if not description:
-        return templates.TemplateResponse(
+        return _render(
             request,
             "index.html",
             {"recent": recent, "error": "Please describe what you want detected.", "description": ""},
@@ -55,7 +79,7 @@ async def create_detection(
     try:
         kind = classify_upload(file.filename or "")
     except UnsupportedFileError as exc:
-        return templates.TemplateResponse(
+        return _render(
             request, "index.html",
             {"recent": recent, "error": str(exc), "description": description},
             status_code=400,
@@ -63,13 +87,13 @@ async def create_detection(
 
     raw = await file.read()
     if not raw:
-        return templates.TemplateResponse(
+        return _render(
             request, "index.html",
             {"recent": recent, "error": "That file is empty.", "description": description},
             status_code=400,
         )
     if len(raw) > settings.max_upload_mb * 1024 * 1024:
-        return templates.TemplateResponse(
+        return _render(
             request, "index.html",
             {"recent": recent,
              "error": f"File is over the {settings.max_upload_mb} MB limit.",
@@ -80,19 +104,23 @@ async def create_detection(
     try:
         norm = normalize_image(raw, kind, page=page)
     except (UnsupportedFileError, PdfRenderError) as exc:
-        return templates.TemplateResponse(
+        return _render(
             request, "index.html",
             {"recent": recent, "error": str(exc), "description": description},
             status_code=400,
         )
 
-    # Persist the exact normalized image that will be sent to the model, so the
-    # returned normalized box overlays pixel-perfect on what we display.
+    # Persist the higher-res normalized image for display, plus a small preview
+    # for history listings. The model gets a further-downscaled copy; because
+    # boxes are normalized [0,1] the overlay maps 1:1 regardless.
     _uploads_dir().mkdir(parents=True, exist_ok=True)
-    media_name = f"{int(time.time() * 1000)}-{uuid4().hex[:8]}.jpg"
+    stem = f"{int(time.time() * 1000)}-{uuid4().hex[:8]}"
+    media_name = f"{stem}.jpg"
+    thumb_name = f"{stem}.thumb.jpg"
     ( _uploads_dir() / media_name).write_bytes(to_jpeg_bytes(norm.image))
+    ( _uploads_dir() / thumb_name).write_bytes(to_jpeg_bytes_thumb(norm.image))
 
-    data_url = to_base64(norm.image, "image/jpeg")
+    data_url = to_llm_base64(norm.image)
     try:
         det = llm.detect(data_url, description)
         detection_id = await save_detection(
@@ -101,6 +129,7 @@ async def create_detection(
             kind=kind,
             page=page if kind == "pdf" else 1,
             media_file=media_name,
+            thumb_file=thumb_name,
             content_type="image/jpeg",
             width=norm.width,
             height=norm.height,
@@ -115,6 +144,7 @@ async def create_detection(
             kind=kind,
             page=page if kind == "pdf" else 1,
             media_file=media_name,
+            thumb_file=thumb_name,
             content_type="image/jpeg",
             width=norm.width,
             height=norm.height,
@@ -140,17 +170,17 @@ async def result_view(request: Request, detection_id: int, db=Depends(get_db)):
             "width": round((det["x2"] - det["x1"]) * 100, 3),
             "height": round((det["y2"] - det["y1"]) * 100, 3),
         }
-    return templates.TemplateResponse(
-        request, "result.html", {"det": det, "box": box}
-    )
+    return _render(request, "result.html", {"det": det, "box": box})
 
 
 @router.get("/media/{detection_id}")
-async def media(detection_id: int, db=Depends(get_db)):
+async def media(request: Request, detection_id: int, db=Depends(get_db)):
     det = await get_detection(db, detection_id)
     if not det:
         raise HTTPException(status_code=404, detail="Not found.")
-    path = _uploads_dir() / det["media_file"]
+    thumb = request.query_params.get("thumb") == "1"
+    name = det["thumb_file"] if (thumb and det["thumb_file"]) else det["media_file"]
+    path = _uploads_dir() / name
     if not path.exists():
         raise HTTPException(status_code=404, detail="Image missing.")
     return FileResponse(path, media_type=det["content_type"])
@@ -159,7 +189,7 @@ async def media(detection_id: int, db=Depends(get_db)):
 @router.get("/history")
 async def history(request: Request, db=Depends(get_db)):
     items = await list_detections(db, limit=get_settings().max_history_items)
-    return templates.TemplateResponse(request, "history.html", {"items": items})
+    return _render(request, "history.html", {"items": items})
 
 
 @router.get("/healthz")

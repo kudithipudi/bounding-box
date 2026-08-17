@@ -1,7 +1,9 @@
 import pytest
 
 from app.services import llm
-from app.services.images import classify_upload, normalize_image, to_base64, UnsupportedFileError
+from app.services.images import (classify_upload, for_llm, make_thumbnail,
+                                 normalize_image, to_base64, to_llm_base64,
+                                 to_jpeg_bytes_thumb, UnsupportedFileError)
 
 
 # --- upload classification -----------------------------------------------
@@ -67,6 +69,58 @@ def test_to_base64_jpeg_data_url(monkeypatch):
     )
     url = to_base64(norm.image, "image/jpeg")
     assert url.startswith("data:image/jpeg;base64,")
+
+
+# --- LLM-resolution pipeline ---------------------------------------------
+
+
+def test_for_llm_downscales_to_cap(monkeypatch):
+    from PIL import Image
+
+    monkeypatch.setenv("LLM_MAX_IMAGE_DIMENSION", "256")
+    big = Image.new("RGB", (1024, 512), (10, 20, 30))
+    down = for_llm(big)
+    assert (down.width, down.height) == (256, 128)
+
+
+def test_for_llm_keeps_small_images(monkeypatch):
+    from PIL import Image
+
+    monkeypatch.setenv("LLM_MAX_IMAGE_DIMENSION", "1024")
+    small = Image.new("RGB", (512, 256), (10, 20, 30))
+    assert for_llm(small) is small
+
+
+def test_to_llm_base64_is_jpeg_data_url(monkeypatch):
+    from PIL import Image
+
+    monkeypatch.setenv("LLM_MAX_IMAGE_DIMENSION", "256")
+    img = Image.new("RGB", (1024, 1024), (200, 100, 50))
+    url = to_llm_base64(img)
+    assert url.startswith("data:image/jpeg;base64,")
+
+
+def test_make_thumbnail_downscales(monkeypatch):
+    from PIL import Image
+
+    img = Image.new("RGB", (1600, 1600), (200, 100, 50))
+    thumb = make_thumbnail(img, max_dim=320)
+    assert max(thumb.size) == 320
+
+
+def test_make_thumbnail_keeps_small(monkeypatch):
+    from PIL import Image
+
+    img = Image.new("RGB", (100, 100), (200, 100, 50))
+    assert make_thumbnail(img, max_dim=320).size == (100, 100)
+
+
+def test_to_jpeg_bytes_thumb(monkeypatch):
+    from PIL import Image
+
+    img = Image.new("RGB", (1000, 800), (200, 100, 50))
+    data = to_jpeg_bytes_thumb(img, max_dim=160)
+    assert data[:2] == b"\xff\xd8"  # JPEG magic
 
 
 def _png_bytes() -> bytes:
