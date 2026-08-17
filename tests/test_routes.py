@@ -373,6 +373,35 @@ def test_detect_rate_limited_per_ip(client, fake_llm, png_bytes, monkeypatch):
     assert "Too many requests" in resp.text
 
 
+def test_detect_rate_limit_keyed_by_x_forwarded_for(client, fake_llm, png_bytes, monkeypatch):
+    """Requests from different X-Forwarded-For values get separate buckets,
+    and a spoofed shared client.host (as happens behind the unix-socket
+    gunicorn setup) doesn't collapse them into one."""
+    monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "1")
+    fake_llm()
+
+    data = {"description": "the red circle"}
+    files = {"file": ("thing.png", png_bytes, "image/png")}
+
+    resp_a1 = client.post(
+        "/detect", data=data, files=files, follow_redirects=False,
+        headers={"X-Forwarded-For": "1.1.1.1"},
+    )
+    assert resp_a1.status_code == 303
+
+    resp_b1 = client.post(
+        "/detect", data=data, files=files, follow_redirects=False,
+        headers={"X-Forwarded-For": "2.2.2.2"},
+    )
+    assert resp_b1.status_code == 303
+
+    resp_a2 = client.post(
+        "/detect", data=data, files=files, follow_redirects=False,
+        headers={"X-Forwarded-For": "1.1.1.1"},
+    )
+    assert resp_a2.status_code == 429
+
+
 # --- admin ---------------------------------------------------------------
 
 
