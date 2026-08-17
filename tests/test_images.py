@@ -174,3 +174,80 @@ def test_detect_requires_api_key(monkeypatch):
     monkeypatch.setenv("LLM_API_KEY", "")
     with pytest.raises(llm.LlmError, match="LLM_API_KEY"):
         llm.detect("data:image/jpeg;base64,AAAA", "the thing")
+
+
+# --- _post: reasoning-field fallback + strict retry ------------------------
+
+
+class _FakeResponse:
+    def __init__(self, payload, status_code=200):
+        self._payload = payload
+        self.status_code = status_code
+        self.text = ""
+        self.request = None
+
+    def json(self):
+        return self._payload
+
+
+def _fake_llm_server(monkeypatch, responses):
+    """Replies from a queue of payloads, so tests can exercise retries."""
+    calls = {"n": 0}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, *args, **kwargs):
+            payload = responses[min(calls["n"], len(responses) - 1)]
+            calls["n"] += 1
+            return _FakeResponse(payload)
+
+    monkeypatch.setattr("app.services.llm.httpx.Client", _Client)
+    return calls
+
+
+def _ok_message(message, model="test-model"):
+    return {"choices": [{"message": message}], "model": model}
+
+
+def test_post_falls_back_to_reasoning_field(monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    _fake_llm_server(monkeypatch, [
+        _ok_message({"role": "assistant", "content": None, "reasoning": '{"boxes": []}'}),
+    ])
+    content, model = llm._post([{"role": "user", "content": "hi"}])
+    assert content == '{"boxes": []}'
+    assert model == "test-model"
+
+
+def test_post_falls_back_to_reasoning_content_field(monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    _fake_llm_server(monkeypatch, [
+        _ok_message({"role": "assistant", "content": None, "reasoning_content": '{"x1": 0.1}'}),
+    ])
+    content, _ = llm._post([{"role": "user", "content": "hi"}])
+    assert content == '{"x1": 0.1}'
+
+
+def test_interpret_retries_once_when_reasoning_is_prose(monkeypatch):
+    """A reasoning model that narrates in `reasoning` instead of emitting JSON
+    should be re-prompted once, and its second reply is used."""
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    prose = {"role": "assistant", "content": None, "reasoning": "Let me think about the circles..."}
+    strict_ok = {"role": "assistant", "content": '{"target": "all circles"}', "reasoning": None}
+    _fake_llm_server(monkeypatch, [_ok_message(prose), _ok_message(strict_ok)])
+    assert llm.interpret("circles") == "all circles"
+
+
+def test_interpret_falls_back_to_description_after_failures(monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    prose = {"role": "assistant", "content": None, "reasoning": "no json here"}
+    _fake_llm_server(monkeypatch, [_ok_message(prose), _ok_message(prose)])
+    assert llm.interpret("banana") == "banana"

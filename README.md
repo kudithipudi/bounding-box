@@ -103,6 +103,12 @@ standalone CLI (vendored at `./tailwindcss`) and committed:
 
 - The default model is `qwen/qwen3.8-27b-free` (free multimodal) — swap
   `LLM_MODEL`/`LLM_BASE_URL`/`LLM_API_KEY` for any OpenAI-compatible provider.
+- Natural-language requests are interpreted by the LLM before the vision call:
+  a bare noun ("banana") and plural/quantified phrases ("all circles",
+  "circles") both mean *every* matching instance, one box per instance; a
+  count or ordinal ("first three signatures", "the top two rows") means
+  *exactly that many* boxes, in top-to-bottom order, stopping at the count.
+  The interpreted target is shown on the confirm page and can be edited.
 - Only the rendered page of a multi-page PDF is sent to the model (page 1 by
   default — say which page you mean in your description). The model sees one
   image, not the whole document.

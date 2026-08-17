@@ -66,11 +66,15 @@ class Detection:
 INTERPRET_PROMPT = (
     "You turn a user's request for finding objects in an image into a short, "
     "concrete detection target. The user may describe objects in natural "
-    "language (e.g. 'find all circles', 'the title text', 'the red chair next "
-    "to the window'). Restate it as exactly what the model should look for, "
-    "keeping plural words like 'all'/'every'/'each' when present. Return a "
-    "single JSON object, with no extra text or markdown, shaped exactly like: "
-    '{"target": "all circles"}.'
+    "language (e.g. 'find all circles', 'banana', 'the red chair next to the "
+    "window', 'the first three signatures'). Restate it as exactly what the "
+    "model should look for. Keep quantifiers that control how many boxes are "
+    "wanted: plural words like 'all'/'every'/'each' (one box per instance), "
+    "and count/ordinal phrases like 'first three'/'the top two' (exactly that "
+    "many, in order). A bare singular noun such as 'banana' still means every "
+    "matching instance, so restate it as 'all bananas' unless the user limits "
+    "the count. Return a single JSON object, with no extra text or markdown, "
+    'shaped exactly like: {"target": "all bananas"}.'
 )
 
 
@@ -81,9 +85,17 @@ DETECT_PROMPT = (
     '{"boxes": [{"x1": 0.0, "y1": 0.0, "x2": 1.0, "y2": 1.0, "label": "short label", "confidence": 0.95}]} '
     "where x1/y1/x2/y2 are normalized bounding-box corners (all values in "
     "[0,1] relative to the image's pixel dimensions, x1 < x2, y1 < y2) tightly "
-    "around each found object. If the target implies multiple instances "
-    "('all', 'every', 'each', plurals), return one box per instance you can "
-    "find. The label is a short phrase describing that box; confidence is your "
+    "around each found object. "
+    "Unless the target limits the count, return one box per instance you can "
+    "find: 'all circles' means every circle in the image, and a bare noun like "
+    "'banana' also means every banana in the image. "
+    "If the target names a count or an ordinal range (e.g. 'first three "
+    "signatures', 'the top two rows', 'all 4 tires'), return exactly that many "
+    "boxes, stopping once you have that many. 'First N'/'top N' means the N "
+    "instances from the top of the image downward unless the user says "
+    "otherwise, so order the returned boxes from top to bottom (smallest y1 "
+    "first) to match. "
+    "The label is a short phrase describing that box; confidence is your "
     "certainty in [0,1]. If nothing matches, return an empty list: {\"boxes\": []}."
 )
 
@@ -173,7 +185,7 @@ def _parse_boxes(data: dict) -> list[DetectionBox]:
     return boxes
 
 
-def _post(messages: list[dict], max_tokens: int = 512) -> tuple[str | None, str]:
+def _post(messages: list[dict], max_tokens: int = 1024) -> tuple[str | None, str]:
     """POST to the OpenAI-compatible endpoint with retry on transient failures.
 
     Returns (content, model). content may be None for empty model replies.
@@ -229,7 +241,15 @@ def _post(messages: list[dict], max_tokens: int = 512) -> tuple[str | None, str]
         )
     data = r.json()
     try:
-        content = data["choices"][0]["message"].get("content")
+        message = data["choices"][0]["message"]
+        # Some reasoning models leave `content` empty and put their answer in a
+        # `reasoning` / `reasoning_content` field instead — fall back to those
+        # so their output is still parsed (and can be re-sent by the caller).
+        content = (
+            message.get("content")
+            or message.get("reasoning")
+            or message.get("reasoning_content")
+        )
         model = data.get("model", "") or settings.llm_model
     except (KeyError, IndexError, TypeError) as exc:
         raise LlmError(f"Unexpected response shape: {(r.text or '')[:600].strip()}") from exc
@@ -248,13 +268,23 @@ def interpret(description: str) -> str:
         {"role": "system", "content": INTERPRET_PROMPT},
         {"role": "user", "content": description},
     ]
-    content, _ = _post(messages, max_tokens=128)
-    try:
-        data = _extract_json(content)
-        target = str(data.get("target", "")).strip()
-    except BadBoxError:
-        target = ""
-    return target or description.strip()
+    for attempt in range(_MAX_JSON_ATTEMPTS):
+        content, _ = _post(messages, max_tokens=256)
+        try:
+            data = _extract_json(content)
+            target = str(data.get("target", "")).strip()
+        except BadBoxError:
+            log.warning("interpret bad JSON attempt %d: %s", attempt + 1, content)
+            if attempt == _MAX_JSON_ATTEMPTS - 1:
+                break
+            messages = messages + [
+                {"role": "user", "content": "Output ONLY a single JSON object with no other text."}
+            ]
+            continue
+        if target:
+            return target
+        break
+    return description.strip()
 
 
 def detect(image_data_url: str, description: str) -> Detection:
