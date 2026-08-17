@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ status_code }} — bounding-box{% endblock %}
+{% block body %}
+<section class="max-w-lg mx-auto text-center pt-8">
+  <h1 class="text-3xl font-bold tracking-tight text-slate-900">{{ status_code }}</h1>
+  <p class="mt-2 text-slate-600">{{ detail }}</p>
+  <p class="mt-6">
+    <a href="{{ prefix }}/" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500">Back home</a>
+  </p>
+</section>
+{% endblock %}

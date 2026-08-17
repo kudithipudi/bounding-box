@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>{% block title %}bounding-box — point the LLM at a box{% endblock %}</title>
+<link rel="icon" href="/favicon.ico" />
+<link rel="stylesheet" href="{{ prefix }}/static/css/app.css" />
+{% block head %}{% endblock %}
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans antialiased">
+<div class="min-h-screen bg-slate-50 text-slate-900">
+
+  <header class="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200">
+    <div class="max-w-[1100px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+      <a href="{{ prefix }}/" class="flex items-center gap-3">
+        <span class="inline-flex items-center justify-center h-9 w-9 rounded-lg bg-indigo-600 text-white text-sm font-bold">B</span>
+        <span class="flex flex-col leading-tight">
+          <span class="text-[15px] font-semibold tracking-tight">bounding-box</span>
+          <span class="text-[11px] text-slate-500">Point the LLM at a box</span>
+        </span>
+      </a>
+      <nav class="hidden sm:flex items-center gap-5 text-sm font-medium text-slate-600">
+        <a href="{{ prefix }}/" class="hover:text-indigo-600 transition">New</a>
+        <a href="{{ prefix }}/history" class="hover:text-indigo-600 transition">History</a>
+      </nav>
+      <a href="https://lab.kudithipudi.org/" class="hidden lg:inline-flex items-center text-sm text-slate-500 hover:text-slate-900 transition">
+        <span aria-hidden="true" class="mr-1">&larr;</span> lab.kudithipudi.org
+      </a>
+    </div>
+  </header>
+
+  <main class="max-w-[1100px] mx-auto px-4 sm:px-6 py-8 space-y-8">
+    {% block body %}{% endblock %}
+  </main>
+
+  <footer class="border-t border-slate-200 py-6 mt-10">
+    <div class="max-w-[1100px] mx-auto px-4 text-xs text-slate-400 space-y-1">
+      <p>bounding-box uploads a PDF or image, asks a vision LLM to find an object you describe, and overlays the resulting bounding box.</p>
+      <p>Part of the <a href="https://lab.kudithipudi.org/" class="hover:text-slate-700 transition">Kudithipudi AI Lab</a>.</p>
+    </div>
+  </footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}bounding-box — result{% endblock %}
+{% block body %}
+
+<section class="max-w-3xl mx-auto w-full">
+  <div class="flex items-center justify-between mb-3">
+    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Detection result</h1>
+    <a href="{{ prefix }}/" class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-indigo-500 hover:text-indigo-600">&larr; New detection</a>
+  </div>
+
+  {% if det.status == 'error' %}
+  <div class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+    <p class="font-medium">The model couldn't find that object.</p>
+    <p class="mt-1 break-words">{{ det.error }}</p>
+  </div>
+  {% endif %}
+
+  <div class="rounded-xl border border-slate-200 bg-white shadow-sm p-4 sm:p-6">
+    <div class="flex flex-wrap items-center gap-2 mb-4 text-sm">
+      <span class="font-medium text-slate-900">&ldquo;{{ det.description }}&rdquo;</span>
+      {% if det.status == 'ok' and det.label %}
+      <span class="rounded bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600">{{ det.label }}</span>
+      {% endif %}
+    </div>
+
+    <div class="relative inline-block max-w-full" style="line-height:0">
+      <img
+        src="{{ prefix }}/media/{{ det.id }}"
+        alt="Detection input"
+        class="max-w-full h-auto rounded-lg border border-slate-200"
+        style="width:auto"
+      />
+      {% if box %}
+      <div
+        class="absolute border-2 border-indigo-500 bg-indigo-500/10 pointer-events-none shadow-[0_0_0_1px_rgba(255,255,255,0.6)]"
+        style="left: {{ box.x1 }}%; top: {{ box.y1 }}%; width: {{ box.width }}%; height: {{ box.height }}%;"
+      ></div>
+      {% endif %}
+    </div>
+
+    {% if det.status == 'ok' %}
+    <div class="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+      <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+        <p class="text-xs text-slate-400">Label</p>
+        <p class="font-medium text-slate-900">{{ det.label or '—' }}</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+        <p class="text-xs text-slate-400">Confidence</p>
+        <p class="font-medium text-slate-900">{{ '%.0f%%' % (det.confidence * 100) if det.confidence is not none else '—' }}</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+        <p class="text-xs text-slate-400">Source</p>
+        <p class="font-medium text-slate-900">{{ det.kind }}{% if det.kind == 'pdf' %} · p{{ det.page }}{% endif %}</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+        <p class="text-xs text-slate-400">Model</p>
+        <p class="font-medium text-slate-900 truncate">{{ det.model or '—' }}</p>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if box %}
+    <div class="mt-4 rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 font-mono text-xs text-slate-600 overflow-x-auto">
+      box = (x1={{ '%.3f' % det.x1 }}, y1={{ '%.3f' % det.y1 }}) → (x2={{ '%.3f' % det.x2 }}, y2={{ '%.3f' % det.y2 }})
+      · normalized to image {{ det.width }}×{{ det.height }}
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}bounding-box — point the LLM at a box{% endblock %}
+{% block body %}
+<section class="max-w-2xl mx-auto text-center pt-4">
+  <h1 class="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900">
+    Point the LLM at a <span class="text-indigo-600">bounding box</span>.
+  </h1>
+  <p class="mt-3 text-slate-600">
+    Upload a PDF or image, say what you want found, and a vision model draws the box around it.
+  </p>
+
+  <form action="{{ prefix }}/detect" method="post" enctype="multipart/form-data" class="mt-8">
+    <div class="space-y-4">
+      <div>
+        <label for="file" class="sr-only">PDF or image</label>
+        <div class="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-8 text-center hover:border-indigo-400 transition">
+          <p class="text-sm text-slate-500 mb-3">PDF or image (.pdf, .png, .jpg, .webp, .bmp&hellip;)</p>
+          <input
+            id="file"
+            name="file"
+            type="file"
+            required
+            accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp,.gif,.tiff,.tif"
+            class="block w-full text-sm text-slate-700 file:mr-4 file:rounded-lg file:border file:border-slate-300 file:bg-white file:px-4 file:py-2 file:text-sm file:font-medium file:text-slate-700 hover:file:border-indigo-500 hover:file:text-indigo-600"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label for="description" class="sr-only">What to detect</label>
+        <input
+          id="description"
+          name="description"
+          type="text"
+          required
+          autofocus
+          placeholder="What should the model find? e.g. the red circle / the title text / the second column"
+          value="{{ description or '' }}"
+          class="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+        />
+        <p class="mt-1.5 text-left text-xs text-slate-400">For multi-page PDFs, include the page number in your description, e.g. &ldquo;on page 2&rdquo;.</p>
+      </div>
+
+      <button
+        type="submit"
+        class="w-full rounded-lg bg-indigo-600 px-6 py-3 font-medium text-white shadow-sm hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+      >
+        Detect
+      </button>
+    </div>
+  </form>
+
+  {% if error %}
+  <div class="mt-6 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-left text-sm text-rose-700">
+    <p class="font-medium">Couldn't run that detection</p>
+    <p class="mt-1 break-words">{{ error }}</p>
+  </div>
+  {% endif %}
+
+  <p class="mt-6 text-xs text-slate-400">
+    Your image is normalized (long edge capped at 1280px) before being sent to the model; nothing is stored beyond the detection record and the normalized copy.
+  </p>
+</section>
+
+{% if recent %}
+<section class="max-w-3xl mx-auto w-full">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-lg font-semibold text-slate-900">Recent</h2>
+    <a href="{{ prefix }}/history" class="text-sm font-medium text-indigo-600 hover:text-indigo-500">View all &rarr;</a>
+  </div>
+  <ul class="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white shadow-sm">
+    {% for d in recent %}
+    <li class="flex items-center gap-3 px-4 py-3">
+      <span class="min-w-0 flex-1">
+        <a href="{{ prefix }}/r/{{ d.id }}" class="block truncate text-sm font-medium text-slate-900 hover:text-indigo-600">
+          {{ d.description }}
+        </a>
+        <span class="block truncate text-xs text-slate-400">{{ d.original_name }} &middot; {{ d.kind }}</span>
+      </span>
+      {% if d.status == 'ok' and d.label %}
+      <span class="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{{ d.label }}</span>
+      {% elif d.status == 'error' %}
+      <span class="shrink-0 rounded bg-rose-50 px-2 py-0.5 text-xs text-rose-600">failed</span>
+      {% endif %}
+      <time class="shrink-0 text-xs text-slate-400" datetime="{{ d.created_at }}">{{ d.created_at }}</time>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

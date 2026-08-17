@@ -1,0 +1,33 @@
+[Unit]
+Description=Bounding Box (FastAPI + Gunicorn)
+After=network.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=exec
+
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/bounding-box
+
+ExecStart=/var/www/bounding-box/venv/bin/gunicorn \
+    --config /var/www/bounding-box/gunicorn.conf.py \
+    app.main:app
+
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=30
+
+Restart=always
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/www/bounding-box /tmp
+
+[Install]
+WantedBy=multi-user.target
