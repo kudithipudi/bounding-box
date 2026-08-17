@@ -45,8 +45,15 @@ class Settings(BaseSettings):
     admin_password: str = ""
     session_secret: str = ""
 
-    # History cap for the /history page.
+    # History cap for the /admin page (unpaginated) and the /history page's
+    # page size (paginated via ?page=N).
     max_history_items: int = 100
+    history_page_size: int = 20
+
+    # Detections left in 'pending' (uploaded but never confirmed/run) older
+    # than this are swept — along with their stored files — on the next visit
+    # to the home page, so abandoned uploads don't accumulate forever.
+    pending_ttl_hours: int = 24
 
 
 def get_settings() -> Settings:

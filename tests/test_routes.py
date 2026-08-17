@@ -157,6 +157,37 @@ def test_pending_redirects_to_confirm(client, fake_llm, png_bytes):
     assert resp.headers["location"] == "/bounding-box/confirm/1"
 
 
+async def test_stale_pending_pruned_on_index_visit(client, fake_llm, png_bytes, monkeypatch):
+    """A 'pending' detection (uploaded but never confirmed) older than the TTL
+    is swept, along with its files, next time someone visits the home page."""
+    import glob
+    import os
+
+    import aiosqlite
+
+    from app.config import get_settings
+
+    fake_llm()
+    _upload(client, content=png_bytes)
+
+    uploads = get_settings().uploads_dir
+    files_before = glob.glob(os.path.join(uploads, "*"))
+    assert len(files_before) == 2  # full image + thumbnail
+
+    monkeypatch.setenv("PENDING_TTL_HOURS", "1")
+    async with aiosqlite.connect(get_settings().db_path) as conn:
+        await conn.execute(
+            "UPDATE detections SET created_at ="
+            " strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-2 hours') WHERE id = 1"
+        )
+        await conn.commit()
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert client.get("/r/1", follow_redirects=False).status_code == 404
+    assert glob.glob(os.path.join(uploads, "*")) == []
+
+
 def test_history_lists_saved_detections(client, fake_llm, png_bytes):
     fake_llm()
     _upload(client, content=png_bytes)
@@ -167,6 +198,36 @@ def test_history_lists_saved_detections(client, fake_llm, png_bytes):
     assert resp.status_code == 200
     assert resp.text.count("the red circle") >= 1
     assert resp.text.count("the blue square") >= 1
+
+
+def test_history_paginates(client, fake_llm, png_bytes, monkeypatch):
+    monkeypatch.setenv("HISTORY_PAGE_SIZE", "2")
+    for desc in ("first", "second", "third"):
+        _upload(client, content=png_bytes, description=desc)
+        _confirm(client)
+
+    resp = client.get("/history")
+    assert resp.status_code == 200
+    assert "Page 1 of 2" in resp.text
+    assert "third" in resp.text and "second" in resp.text
+    assert "first" not in resp.text
+    assert "Older" in resp.text
+    assert "Newer" not in resp.text
+
+    resp = client.get("/history?page=2")
+    assert resp.status_code == 200
+    assert "Page 2 of 2" in resp.text
+    assert "first" in resp.text
+    assert "Newer" in resp.text
+    assert "Older" not in resp.text
+
+
+def test_history_page_out_of_range_clamped(client, fake_llm, png_bytes):
+    fake_llm()
+    _upload(client, content=png_bytes)
+    _confirm(client)
+    resp = client.get("/history?page=999")
+    assert resp.status_code == 200
 
 
 def test_pdf_render_and_detect(client, fake_llm, tmp_path):
@@ -190,6 +251,46 @@ def test_pdf_render_and_detect(client, fake_llm, tmp_path):
     assert "p1" in resp.text
 
 
+def _two_page_pdf(tmp_path):
+    import pymupdf
+
+    pdf_path = tmp_path / "two-page.pdf"
+    doc = pymupdf.open()
+    doc.new_page(width=200, height=200)
+    doc.new_page(width=200, height=200)
+    doc.save(str(pdf_path))
+    doc.close()
+    return pdf_path.read_bytes()
+
+
+def test_pdf_page_selection_renders_chosen_page(client, fake_llm, tmp_path):
+    fake_llm()
+    _upload(
+        client, filename="two-page.pdf", content=_two_page_pdf(tmp_path),
+        description="the square", page=2,
+    )
+    resp = client.get("/confirm/1")
+    assert resp.status_code == 200
+    assert "p2 of 2" in resp.text
+
+    _confirm(client)
+    resp = client.get("/r/1")
+    assert resp.status_code == 200
+    assert "p2 of 2" in resp.text
+
+
+def test_pdf_page_out_of_range_rejected(client, fake_llm, tmp_path):
+    fake_llm()
+    resp = _upload(
+        client, filename="two-page.pdf", content=_two_page_pdf(tmp_path),
+        description="the square", page=5,
+    )
+    assert resp.status_code == 400
+    assert "has 2 pages" in resp.text
+    # No detection was created.
+    assert client.get("/r/1", follow_redirects=False).status_code == 404
+
+
 # --- multiple boxes ------------------------------------------------------
 
 
@@ -210,6 +311,23 @@ def test_multiple_boxes_rendered(client, fake_llm, png_bytes):
     assert resp.text.count("left: 10.0%") >= 1
     assert resp.text.count("left: 50.0%") >= 1
     assert resp.text.count("circle") >= 2
+
+
+def test_confidence_rendered_as_percentage(client, fake_llm, png_bytes):
+    # confidence is stored normalized [0,1]; the page must scale it to a
+    # percentage rather than render the raw fraction.
+    result = Detection(
+        boxes=[DetectionBox(x1=0.1, y1=0.1, x2=0.3, y2=0.3, label="circle", confidence=0.9)],
+        model="test-model",
+        raw="{}",
+    )
+    fake_llm(result=result)
+    _upload(client, content=png_bytes)
+    _confirm(client)
+    resp = client.get("/r/1")
+    assert resp.status_code == 200
+    assert "90%" in resp.text
+    assert "1%" not in resp.text
 
 
 def test_no_boxes_found(client, fake_llm, png_bytes):

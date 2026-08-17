@@ -8,11 +8,12 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import get_settings
-from app.db import (check_and_record_rate_limit, get_db, get_detection,
-                    list_detections, save_detection)
+from app.db import (check_and_record_rate_limit, count_detections, get_db,
+                    get_detection, list_detections, prune_stale_pending,
+                    save_detection)
 from app.services import llm
 from app.services.images import (classify_upload, normalize_image,
-                                 to_jpeg_bytes, to_llm_base64,
+                                 pdf_page_count, to_jpeg_bytes, to_llm_base64,
                                  to_jpeg_bytes_thumb,
                                  UnsupportedFileError, PdfRenderError)
 
@@ -47,8 +48,22 @@ async def _rate_limited(request: Request, db) -> bool:
     )
 
 
+async def _prune_stale_pending(db) -> None:
+    """Sweep abandoned 'pending' detections (uploaded but never confirmed)
+    older than the configured TTL, removing their files too."""
+    stale = await prune_stale_pending(db, get_settings().pending_ttl_hours)
+    for row in stale:
+        for name in (row["media_file"], row["thumb_file"]):
+            if not name:
+                continue
+            path = _uploads_dir() / name
+            if path.exists():
+                path.unlink()
+
+
 @router.get("/")
 async def index(request: Request, db=Depends(get_db)):
+    await _prune_stale_pending(db)
     recent = await list_detections(db, limit=8)
     return _render(request, "index.html", {"recent": recent, "error": None, "description": ""})
 
@@ -108,6 +123,27 @@ async def upload_step(
             status_code=400,
         )
 
+    page = max(1, page)
+    page_count = 1
+    if kind == "pdf":
+        try:
+            page_count = pdf_page_count(raw)
+        except PdfRenderError as exc:
+            return _render(
+                request, "index.html",
+                {"recent": recent, "error": str(exc), "description": description},
+                status_code=400,
+            )
+        if page > page_count:
+            noun = "page" if page_count == 1 else "pages"
+            return _render(
+                request, "index.html",
+                {"recent": recent,
+                 "error": f"That PDF has {page_count} {noun} — choose a page from 1 to {page_count}.",
+                 "description": description},
+                status_code=400,
+            )
+
     try:
         norm = normalize_image(raw, kind, page=page)
     except (UnsupportedFileError, PdfRenderError) as exc:
@@ -129,6 +165,7 @@ async def upload_step(
         original_name=file.filename or "upload",
         kind=kind,
         page=page if kind == "pdf" else 1,
+        page_count=page_count if kind == "pdf" else 1,
         media_file=media_name,
         thumb_file=thumb_name,
         content_type="image/jpeg",
@@ -282,9 +319,15 @@ async def media(request: Request, detection_id: int, db=Depends(get_db)):
 
 
 @router.get("/history")
-async def history(request: Request, db=Depends(get_db)):
-    items = await list_detections(db, limit=get_settings().max_history_items)
-    return _render(request, "history.html", {"items": items})
+async def history(request: Request, page: int = 1, db=Depends(get_db)):
+    page_size = get_settings().history_page_size
+    total = await count_detections(db)
+    total_pages = max(1, -(-total // page_size))  # ceil div
+    page = min(max(1, page), total_pages)
+    items = await list_detections(db, limit=page_size, offset=(page - 1) * page_size)
+    return _render(request, "history.html", {
+        "items": items, "page": page, "total_pages": total_pages, "total": total,
+    })
 
 
 @router.get("/healthz")

@@ -29,6 +29,8 @@ _MIGRATIONS = [
     # bounding-box v3: confirm-before-detect + multiple boxes
     "ALTER TABLE detections ADD COLUMN target TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE detections ADD COLUMN boxes_json TEXT NOT NULL DEFAULT '[]'",
+    # bounding-box v4: PDF page picker (page_count lets the UI show "p2 of 5")
+    "ALTER TABLE detections ADD COLUMN page_count INTEGER NOT NULL DEFAULT 1",
 ]
 
 
@@ -69,6 +71,7 @@ async def save_detection(
     original_name: str,
     kind: str,
     page: int,
+    page_count: int = 1,
     media_file: str,
     thumb_file: str,
     content_type: str,
@@ -88,12 +91,12 @@ async def save_detection(
     error: str = "",
 ) -> int:
     cur = await conn.execute(
-        "INSERT INTO detections (original_name, kind, page, media_file, thumb_file,"
-        " content_type, width, height, description, target, x1, y1, x2, y2, label,"
-        " confidence, boxes_json, model, status, error)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO detections (original_name, kind, page, page_count, media_file,"
+        " thumb_file, content_type, width, height, description, target, x1, y1, x2,"
+        " y2, label, confidence, boxes_json, model, status, error)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            original_name, kind, page, media_file, thumb_file, content_type,
+            original_name, kind, page, page_count, media_file, thumb_file, content_type,
             width, height, description, target, x1, y1, x2, y2, label,
             confidence, boxes_json, model, status, error,
         ),
@@ -116,13 +119,40 @@ async def delete_detection(conn: aiosqlite.Connection, detection_id: int) -> boo
     return cur.rowcount > 0
 
 
-async def list_detections(conn: aiosqlite.Connection, limit: int = 50) -> list[dict]:
+async def prune_stale_pending(conn: aiosqlite.Connection, ttl_hours: int) -> list[dict]:
+    """Delete 'pending' detections (uploaded but never confirmed/run) older
+    than `ttl_hours`. Returns the deleted rows' media_file/thumb_file so the
+    caller can remove the files from disk too."""
+    cutoff = f"-{ttl_hours} hours"
+    rows = await conn.execute_fetchall(
+        "SELECT media_file, thumb_file FROM detections WHERE status = 'pending'"
+        " AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
+        (cutoff,),
+    )
+    stale = [dict(r) for r in rows]
+    if stale:
+        await conn.execute(
+            "DELETE FROM detections WHERE status = 'pending'"
+            " AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
+            (cutoff,),
+        )
+        await conn.commit()
+    return stale
+
+
+async def list_detections(conn: aiosqlite.Connection, limit: int = 50, offset: int = 0) -> list[dict]:
     rows = await conn.execute_fetchall(
         "SELECT id, original_name, kind, description, label, confidence, status,"
-        " thumb_file, created_at FROM detections ORDER BY id DESC LIMIT ?",
-        (limit,),
+        " thumb_file, created_at FROM detections ORDER BY id DESC LIMIT ? OFFSET ?",
+        (limit, offset),
     )
     return [dict(r) for r in rows]
+
+
+async def count_detections(conn: aiosqlite.Connection) -> int:
+    cur = await conn.execute("SELECT COUNT(*) FROM detections")
+    row = await cur.fetchone()
+    return row[0]
 
 
 async def check_and_record_rate_limit(

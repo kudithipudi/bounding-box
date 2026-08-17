@@ -49,6 +49,33 @@ def _extension(filename: str) -> str:
     return "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
 
+def _open_pdf(raw: bytes):
+    try:
+        import pymupdf  # PyMuPDF >= 1.24 exposes the modern `pymupdf` name.
+    except ImportError:
+        try:
+            import fitz as pymupdf  # older alias
+        except ImportError as exc:  # pragma: no cover
+            raise PdfRenderError("PDF support is not installed.") from exc
+    try:
+        doc = pymupdf.open(stream=raw, filetype="pdf")
+    except Exception as exc:
+        raise PdfRenderError("Could not open that PDF.") from exc
+    if doc.page_count == 0:
+        doc.close()
+        raise PdfRenderError("That PDF has no pages.")
+    return pymupdf, doc
+
+
+def pdf_page_count(raw: bytes) -> int:
+    """Number of pages in a PDF, without rendering any of them."""
+    _, doc = _open_pdf(raw)
+    try:
+        return doc.page_count
+    finally:
+        doc.close()
+
+
 def normalize_image(raw: bytes, kind: str, page: int = 1) -> NormalizedImage:
     """Turn raw upload bytes into a normalized RGB image.
 
@@ -74,22 +101,7 @@ def normalize_image(raw: bytes, kind: str, page: int = 1) -> NormalizedImage:
 
 
 def _render_pdf_page(raw: bytes, page: int) -> Image.Image:
-    try:
-        import pymupdf  # PyMuPDF >= 1.24 exposes the modern `pymupdf` name.
-    except ImportError:
-        try:
-            import fitz as pymupdf  # older alias
-        except ImportError as exc:  # pragma: no cover
-            raise PdfRenderError("PDF support is not installed.") from exc
-
-    try:
-        doc = pymupdf.open(stream=raw, filetype="pdf")
-    except Exception as exc:
-        raise PdfRenderError("Could not open that PDF.") from exc
-
-    if doc.page_count == 0:
-        doc.close()
-        raise PdfRenderError("That PDF has no pages.")
+    pymupdf, doc = _open_pdf(raw)
 
     idx = max(0, min(page - 1, doc.page_count - 1))
     settings = get_settings()

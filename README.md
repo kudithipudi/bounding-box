@@ -21,7 +21,8 @@ overlay on your upload.
 - The model returns a normalized `[0,1]` bounding box, drawn as an overlay on
   the uploaded image.
 - Every run is recorded in SQLite (`data/bounding-box.db`) and listed on the
-  History page with preview thumbnails.
+  paginated History page (`HISTORY_PAGE_SIZE` per page) with preview
+  thumbnails.
 - POST /detect is rate-limited per IP (`RATE_LIMIT_PER_MINUTE` over a 60s
   window), same pattern as pretty-print.
 - A password-gated `/admin` area (session-cookie login) lets the operator
@@ -87,6 +88,8 @@ nginx already needs a `location /bounding-box/` block that strips the prefix
 | `RATE_LIMIT_WINDOW_SECONDS` | `60` | Rate-limit window length. |
 | `ADMIN_PASSWORD` | *(empty)* | Password for the /admin area. |
 | `SESSION_SECRET` | *(empty)* | Signs the admin session cookie (stable value for prod). |
+| `PENDING_TTL_HOURS` | `24` | Age after which an unconfirmed ("pending") detection and its files are swept. |
+| `HISTORY_PAGE_SIZE` | `20` | Items per page on `/history`. |
 | `DB_PATH` | `data/bounding-box.db` | SQLite file. |
 | `UPLOADS_DIR` | `data/uploads` | Where normalized images + thumbnails live. |
 
@@ -109,10 +112,14 @@ standalone CLI (vendored at `./tailwindcss`) and committed:
   count or ordinal ("first three signatures", "the top two rows") means
   *exactly that many* boxes, in top-to-bottom order, stopping at the count.
   The interpreted target is shown on the confirm page and can be edited.
-- Only the rendered page of a multi-page PDF is sent to the model (page 1 by
-  default — say which page you mean in your description). The model sees one
-  image, not the whole document.
+- Only one rendered page of a multi-page PDF is sent to the model. A page
+  number field appears on the upload form once a `.pdf` is selected
+  (defaulting to page 1); an out-of-range page is rejected with the PDF's
+  actual page count. The model sees that one image, not the whole document.
 - If the model returns a degenerate box (zero width/height) or invalid JSON,
   the run is recorded as `error` and shown on the result page.
+- Uploads left at the confirm step and never run (`pending`) are pruned,
+  files included, once they're older than `PENDING_TTL_HOURS` — checked on
+  each visit to the home page.
 - Deployments behind nginx need `client_max_body_size` large enough for uploads
   (the bounding-box location uses 30M; the app caps at `MAX_UPLOAD_MB`).

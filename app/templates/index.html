@@ -26,6 +26,19 @@
         </div>
       </div>
 
+      <div id="page-field" class="hidden text-left">
+        <label for="page" class="text-sm text-slate-500">Page (this PDF may have more than one)</label>
+        <input
+          id="page"
+          name="page"
+          type="number"
+          min="1"
+          value="1"
+          inputmode="numeric"
+          class="mt-1 w-28 rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+        />
+      </div>
+
       <div>
         <label for="description" class="sr-only">What to detect</label>
         <input
@@ -38,7 +51,7 @@
           value="{{ description or '' }}"
           class="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
         />
-        <p class="mt-1.5 text-left text-xs text-slate-400">Say &ldquo;all&rdquo; or a plural to detect multiple objects (e.g. &ldquo;all circles&rdquo;). For multi-page PDFs, include the page number, e.g. &ldquo;on page 2&rdquo;.</p>
+        <p class="mt-1.5 text-left text-xs text-slate-400">Say &ldquo;all&rdquo; or a plural to detect multiple objects (e.g. &ldquo;all circles&rdquo;). For a multi-page PDF, pick the page above — only that page is sent to the model.</p>
       </div>
 
       <button
@@ -49,6 +62,16 @@
       </button>
     </div>
   </form>
+  <script>
+    (function () {
+      var fileInput = document.getElementById("file");
+      var pageField = document.getElementById("page-field");
+      fileInput.addEventListener("change", function () {
+        var name = (fileInput.value || "").toLowerCase();
+        pageField.classList.toggle("hidden", !name.endsWith(".pdf"));
+      });
+    })();
+  </script>
 
   {% if error %}
   <div class="mt-6 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-left text-sm text-rose-700">

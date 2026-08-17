@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS detections (
     original_name  TEXT NOT NULL,
     kind           TEXT NOT NULL,               -- 'image' | 'pdf'
     page           INTEGER NOT NULL DEFAULT 1,  -- rendered page for PDFs
+    page_count     INTEGER NOT NULL DEFAULT 1,  -- total pages, for PDFs
     media_file     TEXT NOT NULL,               -- filename under data/uploads
     thumb_file     TEXT NOT NULL DEFAULT '',    -- small JPEG preview for history
     content_type   TEXT NOT NULL,               -- served media content type

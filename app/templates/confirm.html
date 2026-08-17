@@ -23,7 +23,7 @@
           class="w-full rounded-lg border border-slate-200"
         />
         <p class="mt-2 text-xs text-slate-400">
-          {{ det.original_name }} &middot; {{ det.kind }}{% if det.kind == 'pdf' %} · p{{ det.page }}{% endif %}
+          {{ det.original_name }} &middot; {{ det.kind }}{% if det.kind == 'pdf' %} · p{{ det.page }}{% if det.page_count and det.page_count > 1 %} of {{ det.page_count }}{% endif %}{% endif %}
         </p>
       </div>
 

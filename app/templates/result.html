@@ -48,7 +48,7 @@
       <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
         <div class="flex items-center justify-between gap-2">
           <p class="font-medium text-slate-900 truncate">{{ b.label or '—' }}</p>
-          <span class="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{{ b.confidence|round(0)|int if b.confidence is not none else '—' }}%</span>
+          <span class="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{{ (b.confidence * 100)|round(0)|int if b.confidence is not none else '—' }}%</span>
         </div>
         <p class="mt-0.5 text-xs text-slate-400">#{{ loop.index }} · ({{ b.x1 }}, {{ b.y1 }}) → ({{ (b.x1 + b.width)|round(3) }}, {{ (b.y1 + b.height)|round(3) }})</p>
       </div>
@@ -61,7 +61,7 @@
     {% endif %}
 
     <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-slate-400">
-      <span>{{ det.kind }}{% if det.kind == 'pdf' %} · p{{ det.page }}{% endif %}</span>
+      <span>{{ det.kind }}{% if det.kind == 'pdf' %} · p{{ det.page }}{% if det.page_count and det.page_count > 1 %} of {{ det.page_count }}{% endif %}{% endif %}</span>
       <span>model: {{ det.model or '—' }}</span>
       <span>image {{ det.width }}×{{ det.height }} · boxes normalized [0,1]</span>
     </div>
