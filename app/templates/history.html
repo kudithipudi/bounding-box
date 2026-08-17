@@ -32,6 +32,8 @@
         <span class="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{{ d.label }}</span>
         {% elif d.status == 'error' %}
         <span class="shrink-0 rounded bg-rose-50 px-2 py-0.5 text-xs text-rose-600">failed</span>
+        {% elif d.status == 'pending' %}
+        <span class="shrink-0 rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-600">pending</span>
         {% endif %}
         <time class="shrink-0 hidden sm:block text-xs text-slate-400" datetime="{{ d.created_at }}">{{ d.created_at }}</time>
       </li>

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Confirm — bounding-box{% endblock %}
+{% block body %}
+
+<section class="max-w-3xl mx-auto w-full">
+  <div class="flex items-center justify-between mb-3">
+    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Confirm what to look for</h1>
+    <a href="{{ prefix }}/" class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-indigo-500 hover:text-indigo-600">Cancel &larr;</a>
+  </div>
+
+  {% if error %}
+  <div class="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  <div class="rounded-xl border border-slate-200 bg-white shadow-sm p-4 sm:p-6">
+    <div class="flex flex-col sm:flex-row gap-5">
+      <div class="sm:w-1/2">
+        <img
+          src="{{ prefix }}/media/{{ det.id }}"
+          alt="Detection input"
+          class="w-full rounded-lg border border-slate-200"
+        />
+        <p class="mt-2 text-xs text-slate-400">
+          {{ det.original_name }} &middot; {{ det.kind }}{% if det.kind == 'pdf' %} · p{{ det.page }}{% endif %}
+        </p>
+      </div>
+
+      <div class="sm:w-1/2">
+        <p class="text-sm text-slate-500">Your request:</p>
+        <p class="mt-1 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900">
+          &ldquo;{{ det.description }}&rdquo;
+        </p>
+
+        <p class="mt-4 text-sm text-slate-500">I&rsquo;ll look for this in the image:</p>
+        <form action="{{ prefix }}/run/{{ det.id }}" method="post" class="mt-1">
+          <input
+            id="target"
+            name="target"
+            type="text"
+            required
+            autofocus
+            value="{{ det.target or det.description }}"
+            class="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          />
+          <p class="mt-1.5 text-xs text-slate-400">Edit this if it&rsquo;s not quite what you meant — for example &ldquo;all circles&rdquo; instead of &ldquo;the circle&rdquo;.</p>
+          <button
+            type="submit"
+            class="mt-4 w-full rounded-lg bg-indigo-600 px-6 py-3 font-medium text-white shadow-sm hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+          >
+            Detect &amp; draw box
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

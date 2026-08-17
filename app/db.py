@@ -26,6 +26,9 @@ async def connect(db_path: str | None = None) -> aiosqlite.Connection:
 _MIGRATIONS = [
     # bounding-box v2: thumbnails + rate limiting
     "ALTER TABLE detections ADD COLUMN thumb_file TEXT NOT NULL DEFAULT ''",
+    # bounding-box v3: confirm-before-detect + multiple boxes
+    "ALTER TABLE detections ADD COLUMN target TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE detections ADD COLUMN boxes_json TEXT NOT NULL DEFAULT '[]'",
 ]
 
 
@@ -72,24 +75,27 @@ async def save_detection(
     width: int,
     height: int,
     description: str,
+    target: str = "",
     x1: float | None = None,
     y1: float | None = None,
     x2: float | None = None,
     y2: float | None = None,
     label: str = "",
     confidence: float | None = None,
+    boxes_json: str = "[]",
     model: str = "",
     status: str = "ok",
     error: str = "",
 ) -> int:
     cur = await conn.execute(
         "INSERT INTO detections (original_name, kind, page, media_file, thumb_file,"
-        " content_type, width, height, description, x1, y1, x2, y2, label, confidence,"
-        " model, status, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " content_type, width, height, description, target, x1, y1, x2, y2, label,"
+        " confidence, boxes_json, model, status, error)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             original_name, kind, page, media_file, thumb_file, content_type,
-            width, height, description, x1, y1, x2, y2, label, confidence, model,
-            status, error,
+            width, height, description, target, x1, y1, x2, y2, label,
+            confidence, boxes_json, model, status, error,
         ),
     )
     await conn.commit()

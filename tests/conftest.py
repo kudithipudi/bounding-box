@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.llm import Detection
+from app.services.llm import Detection, DetectionBox
 
 
 TEST_ADMIN_PASSWORD = "test-admin-password"
@@ -43,25 +43,38 @@ def admin_client(client):
 
 @pytest.fixture
 def fake_llm(monkeypatch):
-    """Stub llm.detect so POST /detect never performs a real LLM call.
+    """Stub llm.interpret and llm.detect so the flow never hits the network.
 
-    Returns (calls, result) and lets tests override the result/error. Coordinates
-    are normalized, same as the real service returns."""
+    Returns (calls, result) and lets tests override the result/error.
+    interpret returns `target`; detect returns a Detection (defaults to a single
+    box). Coordinates are normalized, same as the real service returns."""
     calls: list[tuple[str, str]] = []
 
-    def _install(result: Detection | None = None, exc: Exception | None = None):
+    def _install(
+        result: Detection | None = None,
+        exc: Exception | None = None,
+        target: str = "the object",
+        interpret_exc: Exception | None = None,
+    ):
         _result = result or Detection(
-            x1=0.1, y1=0.2, x2=0.6, y2=0.8, label="the object",
-            confidence=0.9, model="test-model", raw="{}",
+            boxes=[DetectionBox(x1=0.1, y1=0.2, x2=0.6, y2=0.8, label="the object", confidence=0.9)],
+            model="test-model",
+            raw="{}",
         )
 
-        def _fake(image_data_url: str, description: str) -> Detection:
+        def _fake_interpret(description: str) -> str:
+            if interpret_exc is not None:
+                raise interpret_exc
+            return target
+
+        def _fake_detect(image_data_url: str, description: str) -> Detection:
             calls.append((image_data_url, description))
             if exc is not None:
                 raise exc
             return _result
 
-        monkeypatch.setattr("app.routers.pages.llm.detect", _fake)
+        monkeypatch.setattr("app.routers.pages.llm.interpret", _fake_interpret)
+        monkeypatch.setattr("app.routers.pages.llm.detect", _fake_detect)
         return calls
 
     return _install

@@ -12,12 +12,14 @@ CREATE TABLE IF NOT EXISTS detections (
     width          INTEGER NOT NULL,
     height         INTEGER NOT NULL,
     description    TEXT NOT NULL,
-    x1             REAL,                        -- normalized 0..1
+    target         TEXT NOT NULL DEFAULT '',  -- confirmed detection target
+    x1             REAL,                        -- normalized 0..1 (primary box)
     y1             REAL,
     x2             REAL,
     y2             REAL,
     label          TEXT,
     confidence     REAL,
+    boxes_json     TEXT NOT NULL DEFAULT '[]',  -- all boxes, [{x1,y1,x2,y2,label,confidence}]
     model          TEXT,
     status         TEXT NOT NULL DEFAULT 'ok',  -- 'ok' | 'error'
     error          TEXT NOT NULL DEFAULT '',

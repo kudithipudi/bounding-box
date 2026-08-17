@@ -1,9 +1,18 @@
 """Vision-LLM bounding-box detection via any OpenAI-compatible endpoint.
 
-The app POSTs the normalized image (as a base64 data URL in an OpenAI-style
-image_url content part) plus the user's description to {base}/chat/completions
-and asks the model to return the detected object's bounding box as normalized
-[0,1] coordinates (same coordinate space as the displayed image).
+Two calls per run:
+
+1. ``interpret()`` — a cheap text-only call that restates the user's free-text
+   request as a crisp detection target (e.g. "find all circles" -> "all
+   circles"). The app shows this to the user for confirmation *before* the
+   (more expensive) vision call.
+2. ``detect()`` — the vision call. It POSTs the normalized image (base64 data
+   URL in an OpenAI-style image_url content part) plus the confirmed target and
+   asks the model to return one or more bounding boxes as normalized [0,1]
+   coordinates (same coordinate space as the displayed image).
+
+Both calls tolerate empty/"None" content and unparseable JSON by retrying once
+with a stricter "return only JSON" instruction before giving up.
 """
 from __future__ import annotations
 
@@ -22,6 +31,8 @@ log = logging.getLogger(__name__)
 _RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504, 522, 524}
 _RETRYABLE_EXC = (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.NetworkError)
 
+_MAX_JSON_ATTEMPTS = 2  # 1 normal + 1 strict retry when parsing fails
+
 
 class LlmError(Exception):
     pass
@@ -32,40 +43,68 @@ class BadBoxError(LlmError):
 
 
 @dataclass
-class Detection:
+class DetectionBox:
     x1: float
     y1: float
     x2: float
     y2: float
     label: str
     confidence: float
+
+
+@dataclass
+class Detection:
+    boxes: list[DetectionBox]
     model: str
     raw: str
 
+    @property
+    def primary(self) -> DetectionBox | None:
+        return self.boxes[0] if self.boxes else None
 
-SYSTEM_PROMPT = (
+
+INTERPRET_PROMPT = (
+    "You turn a user's request for finding objects in an image into a short, "
+    "concrete detection target. The user may describe objects in natural "
+    "language (e.g. 'find all circles', 'the title text', 'the red chair next "
+    "to the window'). Restate it as exactly what the model should look for, "
+    "keeping plural words like 'all'/'every'/'each' when present. Return a "
+    "single JSON object, with no extra text or markdown, shaped exactly like: "
+    '{"target": "all circles"}.'
+)
+
+
+DETECT_PROMPT = (
     "You are an object-detection assistant. The user supplies one image and a "
-    "text description of an object they want located. Find the object in the "
-    "image and return a single JSON object, with no extra text or markdown, "
-    "shaped exactly like: "
-    '{"x1": 0.0, "y1": 0.0, "x2": 1.0, "y2": 1.0, "label": "short label", "confidence": 0.95} '
-    "where x1/y1/x2/y2 are the normalized bounding-box corners (all values in "
+    "detection target. Find the described object(s) in the image and return a "
+    "single JSON object, with no extra text or markdown, shaped exactly like: "
+    '{"boxes": [{"x1": 0.0, "y1": 0.0, "x2": 1.0, "y2": 1.0, "label": "short label", "confidence": 0.95}]} '
+    "where x1/y1/x2/y2 are normalized bounding-box corners (all values in "
     "[0,1] relative to the image's pixel dimensions, x1 < x2, y1 < y2) tightly "
-    "around the described object. The label should be a short phrase describing "
-    "what was detected; confidence is your certainty in [0,1]."
+    "around each found object. If the target implies multiple instances "
+    "('all', 'every', 'each', plurals), return one box per instance you can "
+    "find. The label is a short phrase describing that box; confidence is your "
+    "certainty in [0,1]. If nothing matches, return an empty list: {\"boxes\": []}."
 )
 
 
 def _user_prompt(description: str) -> str:
     return (
-        f"Find and bound the following object in the supplied image:\n\n"
+        f"Find and bound the following object(s) in the supplied image:\n\n"
         f"{description}\n\n"
         "Return only the JSON described in the system message."
     )
 
 
-def _extract_json(content: str) -> dict:
-    """Parse JSON out of the model's reply, tolerating stray prose/markdown."""
+def _extract_json(content: str | None) -> dict:
+    """Parse JSON out of the model's reply, tolerating stray prose/markdown.
+
+    Raises BadBoxError on any failure, including an empty/None reply (some
+    vision models return a literal 'None' or an empty string when their output
+    lands in a reasoning field instead of content).
+    """
+    if not content or not content.strip():
+        raise BadBoxError("Model returned an empty response.")
     content = content.strip()
     # Strip a ```json ... ``` fence if the model wrapped the answer.
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
@@ -101,10 +140,43 @@ def _parse_box(data: dict) -> tuple[float, float, float, float]:
     return x1, y1, x2, y2
 
 
-def _call_chat(image_data_url: str, description: str) -> tuple[str, str]:
+def _parse_boxes(data: dict) -> list[DetectionBox]:
+    """Parse the model's reply into one or more boxes.
+
+    Accepts both the canonical ``{"boxes": [...]}`` shape and a legacy single
+    ``{"x1": ..., "y1": ..., ...}`` shape (in case a provider/model returns the
+    old format).
+    """
+    raw_boxes = data.get("boxes")
+    if raw_boxes is None:
+        raw_boxes = [data]  # legacy single-box reply
+    if not isinstance(raw_boxes, list):
+        raise BadBoxError(f"Model response 'boxes' is not a list: {data!r}")
+
+    boxes: list[DetectionBox] = []
+    for entry in raw_boxes:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            x1, y1, x2, y2 = _parse_box(entry)
+        except BadBoxError:
+            continue  # skip malformed entries rather than fail the whole run
+        label = str(entry.get("label", "")).strip()
+        try:
+            confidence = float(entry.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        boxes.append(DetectionBox(
+            x1=x1, y1=y1, x2=x2, y2=y2, label=label,
+            confidence=min(max(confidence, 0.0), 1.0),
+        ))
+    return boxes
+
+
+def _post(messages: list[dict], max_tokens: int = 512) -> tuple[str | None, str]:
     """POST to the OpenAI-compatible endpoint with retry on transient failures.
 
-    Returns (content, model).
+    Returns (content, model). content may be None for empty model replies.
     """
     settings = get_settings()
     if not settings.llm_api_key:
@@ -114,17 +186,8 @@ def _call_chat(image_data_url: str, description: str) -> tuple[str, str]:
     body = {
         "model": settings.llm_model,
         "temperature": settings.llm_temperature,
-        "max_tokens": 512,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": _user_prompt(description)},
-                    {"type": "image_url", "image_url": {"url": image_data_url}},
-                ],
-            },
-        ],
+        "max_tokens": max_tokens,
+        "messages": messages,
     }
     headers = {
         "Authorization": f"Bearer {settings.llm_api_key}",
@@ -166,32 +229,65 @@ def _call_chat(image_data_url: str, description: str) -> tuple[str, str]:
         )
     data = r.json()
     try:
-        content = data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"].get("content")
         model = data.get("model", "") or settings.llm_model
     except (KeyError, IndexError, TypeError) as exc:
         raise LlmError(f"Unexpected response shape: {(r.text or '')[:600].strip()}") from exc
     log.info(
         "llm call ok model=%s latency=%dms", model, int((time.perf_counter() - started) * 1000)
     )
-    return str(content), model
+    return content, model
+
+
+def interpret(description: str) -> str:
+    """Restate the user's request as a concrete detection target.
+
+    Falls back to the raw description if the model can't be bothered.
+    """
+    messages = [
+        {"role": "system", "content": INTERPRET_PROMPT},
+        {"role": "user", "content": description},
+    ]
+    content, _ = _post(messages, max_tokens=128)
+    try:
+        data = _extract_json(content)
+        target = str(data.get("target", "")).strip()
+    except BadBoxError:
+        target = ""
+    return target or description.strip()
 
 
 def detect(image_data_url: str, description: str) -> Detection:
-    """Detect the object described by `description` in the given image.
+    """Detect the object(s) described by `description` in the given image.
 
-    Raises LlmError / BadBoxError on failure. The returned box is normalized
-    to [0,1] relative to the image the caller supplied.
+    Raises LlmError / BadBoxError on failure (after one strict-format retry).
+    Returns boxes normalized to [0,1] relative to the image the caller supplied.
     """
-    content, model = _call_chat(image_data_url, description)
-    data = _extract_json(content)
-    x1, y1, x2, y2 = _parse_box(data)
-    label = str(data.get("label", "")).strip()
-    try:
-        confidence = float(data.get("confidence", 0.0))
-    except (TypeError, ValueError):
-        confidence = 0.0
-    confidence = min(max(confidence, 0.0), 1.0)
-    return Detection(
-        x1=x1, y1=y1, x2=x2, y2=y2, label=label, confidence=confidence,
-        model=model, raw=content,
-    )
+    messages = [
+        {"role": "system", "content": DETECT_PROMPT},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": _user_prompt(description)},
+                {"type": "image_url", "image_url": {"url": image_data_url}},
+            ],
+        },
+    ]
+    last_exc: BadBoxError | None = None
+    for attempt in range(_MAX_JSON_ATTEMPTS):
+        content, model = _post(messages)
+        try:
+            boxes = _parse_boxes(_extract_json(content))
+            return Detection(boxes=boxes, model=model, raw=content or "")
+        except BadBoxError as exc:
+            last_exc = exc
+            log.warning("llm bad JSON attempt %d: %s", attempt + 1, exc)
+            if attempt == _MAX_JSON_ATTEMPTS - 1:
+                break
+            # Retry with a strict instruction appended — models often comply
+            # when told plainly to output nothing but JSON.
+            messages = messages + [
+                {"role": "user", "content": "Output ONLY a single JSON object with no other text."}
+            ]
+    assert last_exc is not None
+    raise last_exc
