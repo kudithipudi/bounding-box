@@ -11,8 +11,9 @@ overlay on your upload.
 - PDFs are rasterized page-first with PyMuPDF; images are normalized (RGB, long
   edge capped at `MAX_IMAGE_DIMENSION`, default 1280px).
 - The normalized image is sent to a vision LLM over an **OpenAI-compatible**
-  endpoint (orcarouter) as a base64 `image_url` content part, along with your
-  description.
+  endpoint as a base64 `image_url` content part, along with your
+  description. Any OpenAI-compatible provider works — OpenRouter, orcarouter,
+  a local vLLM/Ollama server, etc.
 - The model returns a normalized `[0,1]` bounding box, which is overlaid on the
   exact same normalized image that was sent to the model — so the box maps
   1:1 to what you see, at any render size.
@@ -29,7 +30,7 @@ SQLite (aiosqlite) · PyMuPDF · Pillow · httpx
 ```bash
 python3.12 -m venv venv
 ./venv/bin/pip install -r requirements.txt
-# copy the template, then set ORCAROUTER_API_KEY (+ verify the model id)
+# copy the template, then set LLM_API_KEY (+ verify the model id)
 cp .env.example .env
 ./venv/bin/uvicorn app.main:app --reload
 ```
@@ -63,9 +64,9 @@ nginx already needs a `location /bounding-box/` block that strips the prefix
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ROOT_PATH` | `/bounding-box` | Public subpath the app is mounted at (template prefix only). |
-| `ORCAROUTER_API_KEY` | *(empty)* | API key for the orcarouter endpoint. Required for detection. |
-| `ORCAROUTER_BASE_URL` | `https://api.orcarouter.ai/v1` | OpenAI-compatible base URL (the `/chat/completions` suffix is appended). |
-| `ORCAROUTER_MODEL` | `qwen/qwen3.8-27b-free` | Exact model id to call. |
+| `LLM_API_KEY` | *(empty)* | API key for your OpenAI-compatible LLM endpoint. Required for detection. |
+| `LLM_BASE_URL` | `https://api.orcarouter.ai/v1` | OpenAI-compatible base URL (the `/chat/completions` suffix is appended). Works with any provider. |
+| `LLM_MODEL` | `qwen/qwen3.8-27b-free` | Exact model id to call. |
 | `LLM_TEMPERATURE` | `0.0` | Sampling temperature. |
 | `LLM_TIMEOUT_SECONDS` | `90` | Per-attempt HTTP timeout. |
 | `LLM_MAX_RETRIES` | `2` | Retries on transient errors. |
@@ -87,9 +88,8 @@ standalone CLI (vendored at `./tailwindcss`) and committed:
 
 ## Notes / limitations
 
-- The default model is `qwen/qwen3.8-27b-free` on orcarouter — a free
-  multimodal (vision) model. Override `ORCAROUTER_MODEL` if you want a different
-  one.
+- The default model is `qwen/qwen3.8-27b-free` (free multimodal) — swap
+  `LLM_MODEL`/`LLM_BASE_URL`/`LLM_API_KEY` for any OpenAI-compatible provider.
 - Only the rendered page of a multi-page PDF is sent to the model (page 1 by
   default — say which page you mean in your description). The model sees one
   image, not the whole document.

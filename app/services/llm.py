@@ -1,4 +1,4 @@
-"""Vision-LLM bounding-box detection via orcarouter (OpenAI-compatible endpoint).
+"""Vision-LLM bounding-box detection via any OpenAI-compatible endpoint.
 
 The app POSTs the normalized image (as a base64 data URL in an OpenAI-style
 image_url content part) plus the user's description to {base}/chat/completions
@@ -107,12 +107,12 @@ def _call_chat(image_data_url: str, description: str) -> tuple[str, str]:
     Returns (content, model).
     """
     settings = get_settings()
-    if not settings.orcarouter_api_key:
-        raise LlmError("No ORCAROUTER_API_KEY configured.")
-    base = settings.orcarouter_base_url.rstrip("/")
+    if not settings.llm_api_key:
+        raise LlmError("No LLM_API_KEY configured.")
+    base = settings.llm_base_url.rstrip("/")
     url = f"{base}/chat/completions"
     body = {
-        "model": settings.orcarouter_model,
+        "model": settings.llm_model,
         "temperature": settings.llm_temperature,
         "max_tokens": 512,
         "messages": [
@@ -127,7 +127,7 @@ def _call_chat(image_data_url: str, description: str) -> tuple[str, str]:
         ],
     }
     headers = {
-        "Authorization": f"Bearer {settings.orcarouter_api_key}",
+        "Authorization": f"Bearer {settings.llm_api_key}",
         "Content-Type": "application/json",
     }
     timeout = httpx.Timeout(settings.llm_timeout_seconds)
@@ -147,8 +147,8 @@ def _call_chat(image_data_url: str, description: str) -> tuple[str, str]:
             continue
         if 400 <= r.status_code < 500 and r.status_code not in _RETRYABLE_STATUS:
             raise LlmError(
-                f"{r.status_code} from {settings.orcarouter_base_url} "
-                f"(model={settings.orcarouter_model}): {(r.text or '')[:600].strip()}"
+                f"{r.status_code} from {settings.llm_base_url} "
+                f"(model={settings.llm_model}): {(r.text or '')[:600].strip()}"
             )
         if r.status_code in _RETRYABLE_STATUS and attempt < len(backoffs) - 1:
             last_exc = httpx.HTTPStatusError(
@@ -161,13 +161,13 @@ def _call_chat(image_data_url: str, description: str) -> tuple[str, str]:
 
     if r.status_code >= 400:
         raise LlmError(
-            f"{r.status_code} from {settings.orcarouter_base_url} after "
+            f"{r.status_code} from {settings.llm_base_url} after "
             f"{attempt + 1} attempt(s): {(r.text or '')[:600].strip()}"
         )
     data = r.json()
     try:
         content = data["choices"][0]["message"]["content"]
-        model = data.get("model", "") or settings.orcarouter_model
+        model = data.get("model", "") or settings.llm_model
     except (KeyError, IndexError, TypeError) as exc:
         raise LlmError(f"Unexpected response shape: {(r.text or '')[:600].strip()}") from exc
     log.info(

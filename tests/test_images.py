@@ -117,6 +117,6 @@ def test_parse_box_missing_raises():
 
 
 def test_detect_requires_api_key(monkeypatch):
-    monkeypatch.setenv("ORCAROUTER_API_KEY", "")
-    with pytest.raises(llm.LlmError, match="ORCAROUTER_API_KEY"):
+    monkeypatch.setenv("LLM_API_KEY", "")
+    with pytest.raises(llm.LlmError, match="LLM_API_KEY"):
         llm.detect("data:image/jpeg;base64,AAAA", "the thing")

@@ -10,12 +10,12 @@ class Settings(BaseSettings):
     db_path: str = "data/bounding-box.db"
     uploads_dir: str = "data/uploads"
 
-    # orcarouter — an OpenAI-compatible endpoint. Point ORCAROUTER_BASE_URL at
-    # the /v1 root of the router and set ORCAROUTER_MODEL to the exact model id
-    # (e.g. "qwen/qwen3.8-27b-free"). Both come from .env.
-    orcarouter_api_key: str = ""
-    orcarouter_base_url: str = "https://api.orcarouter.ai/v1"
-    orcarouter_model: str = "qwen/qwen3.8-27b-free"
+    # Vision LLM via any OpenAI-compatible endpoint (OpenRouter, orcarouter, a
+    # local vLLM/Ollama server, ...). Point LLM_BASE_URL at the /v1 root of the
+    # provider and set LLM_MODEL to the exact model id.
+    llm_api_key: str = ""
+    llm_base_url: str = "https://api.orcarouter.ai/v1"
+    llm_model: str = "qwen/qwen3.8-27b-free"
     llm_temperature: float = 0.0
     llm_timeout_seconds: int = 90
     llm_max_retries: int = 2
