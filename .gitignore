@@ -11,3 +11,21 @@ tailwindcss
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 graft/
+# AI assistant / local tooling config (not project code)
+CLAUDE.md
+claude.md
+AGENTS.md
+agents.md
+opencode.json
+opencode.jsonc
+.mcp.json
+.ignore
+.claude/
+.cursor/
+.cursorrules
+.windsurfrules
+.aider*
+
+# OS junk
+.DS_Store
+Thumbs.db
