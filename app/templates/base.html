@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="theme-color" content="#ffffff" />
 <title>{% block title %}bounding-box — point the LLM at a box{% endblock %}</title>
 <link rel="icon" href="/favicon.ico" />
 <link rel="stylesheet" href="{{ prefix }}/static/css/app.css" />
@@ -10,6 +11,8 @@
 </head>
 <body class="bg-slate-50 text-slate-900 font-sans antialiased">
 <div class="min-h-screen bg-slate-50 text-slate-900">
+
+  <a class="sr-only focus:not-sr-only" href="#main">Skip to content</a>
 
   <header class="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200">
     <div class="max-w-[1100px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
@@ -33,7 +36,7 @@
     </div>
   </header>
 
-  <main class="max-w-[1100px] mx-auto px-4 sm:px-6 py-8 space-y-8">
+  <main id="main" class="max-w-[1100px] mx-auto px-4 sm:px-6 py-8 space-y-8">
     {% block body %}{% endblock %}
   </main>
 
@@ -44,5 +47,30 @@
     </div>
   </footer>
 </div>
+<script>
+  (function () {
+    var fmtDate = new Intl.DateTimeFormat(undefined, {
+      year: "numeric", month: "short", day: "numeric",
+      hour: "numeric", minute: "2-digit"
+    });
+    var times = document.querySelectorAll("time[data-ts]");
+    for (var i = 0; i < times.length; i++) {
+      var date = new Date(times[i].getAttribute("datetime"));
+      if (!isNaN(date.getTime())) {
+        times[i].textContent = fmtDate.format(date);
+      }
+    }
+    var fmtPct = new Intl.NumberFormat(undefined, {
+      style: "percent", maximumFractionDigits: 0
+    });
+    var confs = document.querySelectorAll("[data-conf]");
+    for (var j = 0; j < confs.length; j++) {
+      var value = parseFloat(confs[j].getAttribute("data-conf"));
+      if (isFinite(value)) {
+        confs[j].textContent = fmtPct.format(value);
+      }
+    }
+  })();
+</script>
 </body>
 </html>

@@ -46,8 +46,7 @@
           name="description"
           type="text"
           required
-          autofocus
-          placeholder="What should the model find? e.g. all circles / the title text / the red chair"
+          placeholder="What to detect (e.g. the red chair)…"
           value="{{ description or '' }}"
           class="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
         />
@@ -107,7 +106,7 @@
       {% elif d.status == 'pending' %}
       <span class="shrink-0 rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-600">pending</span>
       {% endif %}
-      <time class="shrink-0 text-xs text-slate-400" datetime="{{ d.created_at }}">{{ d.created_at }}</time>
+      <time class="shrink-0 text-xs text-slate-400" datetime="{{ d.created_at }}" data-ts>{{ d.created_at }}</time>
     </li>
     {% endfor %}
   </ul>

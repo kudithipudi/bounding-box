@@ -39,7 +39,7 @@
         <span class="shrink-0 rounded bg-rose-50 px-2 py-0.5 text-xs text-rose-600">failed</span>
         {% endif %}
         <time class="shrink-0 hidden sm:block text-xs text-slate-400" datetime="{{ d.created_at }}">{{ d.created_at }}</time>
-        <form action="{{ prefix }}/admin/delete/{{ d.id }}" method="post" onsubmit="return confirm('Delete this detection?')">
+        <form action="{{ prefix }}/admin/delete/{{ d.id }}" method="post" data-delete-form>
           <button type="submit" class="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-rose-500 hover:text-rose-600">Delete</button>
         </form>
       </li>
@@ -47,5 +47,49 @@
     </ul>
   </div>
   {% endif %}
+
+  <dialog id="delete-dialog" class="rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+    <h2 class="text-lg font-bold tracking-tight text-slate-900">Delete this detection?</h2>
+    <p class="mt-1 text-sm text-slate-500">The record and its stored image are removed permanently.</p>
+    <div class="mt-5 flex items-center justify-end gap-2">
+      <button type="button" data-dialog-close class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-indigo-500 hover:text-indigo-600">Cancel</button>
+      <button type="button" data-delete-confirm class="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2">Delete</button>
+    </div>
+  </dialog>
 </section>
+<script>
+  (function () {
+    var dialog = document.getElementById("delete-dialog");
+    var formToSubmit = null;
+    var forms = document.querySelectorAll("form[data-delete-form]");
+    for (var i = 0; i < forms.length; i++) {
+      forms[i].addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (dialog && typeof dialog.showModal === "function") {
+          formToSubmit = this;
+          dialog.showModal();
+        } else if (window.confirm("Delete this detection?")) {
+          this.submit();
+        }
+      });
+    }
+    if (dialog && typeof dialog.showModal === "function") {
+      var confirmBtn = document.querySelector("[data-delete-confirm]");
+      if (confirmBtn) {
+        confirmBtn.addEventListener("click", function () {
+          if (formToSubmit) formToSubmit.submit();
+        });
+      }
+      var closeBtns = document.querySelectorAll("[data-dialog-close]");
+      for (var j = 0; j < closeBtns.length; j++) {
+        closeBtns[j].addEventListener("click", function () {
+          dialog.close();
+        });
+      }
+      dialog.addEventListener("close", function () {
+        formToSubmit = null;
+      });
+    }
+  })();
+</script>
 {% endblock %}
